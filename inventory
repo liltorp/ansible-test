@@ -1,0 +1,15 @@
+[web_servers]
+192.168.20.12
+
+[db_servers]
+192.168.2.233
+
+[file_servers]
+192.168.2.154
+
+[ansible_servers]
+ansi1
+ansi2
+ansi3
+ansi4
+

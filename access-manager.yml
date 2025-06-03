@@ -1,0 +1,113 @@
+---
+- name: elementer til am servere
+  hosts: all
+  become: true
+  tasks:
+  - name: install extra packages
+    yum:
+       name: glibc.i686,libstdc++.i686
+       state: present
+  - name: firewall rules for id servers
+    firewalld:
+      port: "{{item}}"
+      state: enabled
+      permanent: yes
+      immediate: yes
+    loop:
+      - 22/tcp
+      - 443/tcp
+      - 524/tcp
+      - 1443/tcp
+      - 7801/tcp
+      - 8443/tcp
+      - 9968/tcp
+  - name: firewall rules for admin servers
+    firewalld:
+      port: "{{item}}"
+      state: enabled
+      permanent: yes
+      immediate: yes
+    loop:
+      - 22/tcp
+      - 524/tcp
+      - 636/tcp
+      - 705/tcp
+      - 1290/tcp
+      - 8030/tcp
+      - 8443/tcp
+      - 8444/tcp
+      - 9968/tcp 
+  - name: firewall rules for gw servers
+    firewalld:
+      port: "{{item}}"
+      state: enabled
+      permanent: yes
+      immediate: yes
+    loop:
+      - 22/tcp
+      - 443/tcp
+      - 524/tcp
+      - 1099/tcp
+      - 1443/tcp
+      - 7801/tcp
+      - 9968/tcp
+  - name: firewall rules for odb servers
+    firewalld:
+      port: "{{item}}"
+      state: enabled
+      permanent: yes
+      immediate: yes
+    loop:
+      - 22/tcp
+      - 1521/tcp
+  - name: firewall rules for pwr servers
+    firewalld:
+      port: "{{item}}"
+      state: enabled
+      permanent: yes
+      immediate: yes
+    loop:
+      - 22/tcp
+      - 80/tcp
+      - 443/tcp
+  - name: firewall rules for edir servers
+    firewalld:
+      port: "{{item}}"
+      state: enabled
+      permanent: yes
+      immediate: yes
+    loop:
+      - 22/tcp
+      - 524/tcp
+      - 636/tcp
+      - 8030/tcp
+      - 8443/tcp
+  - name: firewall rules for aa-db servers
+    firewalld:
+      port: "{{item}}"
+      state: enabled
+      permanent: yes
+      immediate: yes
+    loop:
+      - 22/tcp
+      - 80/tcp
+      - 443/tcp
+      - 8080/tcp
+      - 8432/tcp
+      - 9200/tcp
+      - 9300/tcp
+  - name: firewall rules for aa-web servers
+    firewalld:
+      port: "{{item}}"
+      state: enabled
+      permanent: yes
+      immediate: yes
+    loop:
+      - 22/tcp
+      - 80/tcp
+      - 443/tcp
+      - 8080/tcp
+      - 8432/tcp
+      - 9200/tcp
+      - 9300/tcp
+      
