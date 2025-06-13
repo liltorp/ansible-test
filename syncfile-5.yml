@@ -1,0 +1,94 @@
+---
+- name: Sync the latest version of a file across servers
+  hosts: all
+  become: true
+  gather_facts: no
+  vars:
+    file_path: "/home/lars/copyfile.txt"
+    local_temp_dir: "/home/lars/temp"
+  tasks:
+
+    - name: Ensure local temp dir exists
+      file:
+        path: "{{ local_temp_dir }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+
+    - name: Check if the file exists and gather stat info
+      stat:
+        path: "{{ file_path }}"
+      register: file_stat
+
+    - name: Save file stat info as fact on each host
+      set_fact:
+        my_file_stat: "{{ file_stat.stat }}"
+
+    - name: Find the most recent file and its host
+      run_once: true
+      delegate_to: localhost
+      vars:
+        latest_host: ""
+        latest_mtime: 0
+      set_fact:
+        latest_host: "{{ item.0 }}"
+        latest_mtime: "{{ item.1.mtime }}"
+      loop: "{{ ansible_play_hosts | zip(ansible_play_hosts | map('extract', hostvars, 'my_file_stat')) | list }}"
+      when: item.1.exists and item.1.mtime | int > latest_mtime | int
+
+    - name: Show which host has the latest file
+      debug:
+        msg: "Host '{{ latest_host }}' has the latest file modified at {{ latest_mtime }}"
+      run_once: true
+      delegate_to: localhost
+
+    - name: Abort if no file was found on any server
+      fail:
+        msg: "No file found on any server."
+      when: latest_host == ""
+      run_once: true
+      delegate_to: localhost
+
+    - name: Fetch the latest file from the source host to control node
+      fetch:
+        src: "{{ file_path }}"
+        dest: "{{ local_temp_dir }}/copyfile.txt"
+        flat: yes
+      delegate_to: "{{ latest_host }}"
+      run_once: true
+
+    - name: Verify the file exists on the control node
+      stat:
+        path: "{{ local_temp_dir }}/copyfile.txt"
+      delegate_to: localhost
+      run_once: true
+      register: local_file_check
+
+    - name: Fail if file was not fetched
+      fail:
+        msg: "File not found on control node at {{ local_temp_dir }}/copyfile.txt"
+      when: not local_file_check.stat.exists
+      run_once: true
+
+    - name: Copy the latest file to all other servers
+      copy:
+        src: "{{ local_temp_dir }}/copyfile.txt"
+        dest: "{{ file_path }}"
+        owner: root
+        group: root
+        mode: '0644'
+      when: inventory_hostname != latest_host
+      register: copy_result
+
+    - name: Log copied file destinations
+      debug:
+        msg: "Fil kopieret fra {{ latest_host }} til {{ inventory_hostname }}: {{ copy_result.dest }}"
+      when: inventory_hostname != latest_host and copy_result is defined
+
+    - name: Clean up temp directory on control node
+      file:
+        path: "{{ local_temp_dir }}/copyfile.txt"
+        state: absent
+      delegate_to: localhost
+      run_once: true

@@ -1,0 +1,93 @@
+---
+- name: Sync the latest version of a file across servers
+  hosts: all
+  gather_facts: false
+  vars:
+    file_to_sync: "/home/lars/copyfile.txt"
+    local_temp_dir_for_latest_file: "/home/lars/temp"
+
+  tasks:
+
+    - name: Ensure local temp dir exists
+      file:
+        path: "{{ local_temp_dir_for_latest_file }}"
+        state: directory
+        mode: '0755'
+      run_once: true
+      delegate_to: localhost
+
+    - name: Check if the file exists and gather stat info
+      stat:
+        path: "{{ file_to_sync }}"
+      register: file_stat
+
+    - name: Save file stat info as fact on each host
+      set_fact:
+        file_stats: "{{ file_stat }}"
+
+    - name: Determine the host with the latest file
+      run_once: true
+      delegate_to: localhost
+      vars:
+        latest_file_host: ""
+        latest_file_mtime: 0
+      block:
+        - name: Find the most recent file and its host
+          set_fact:
+            latest_file_host: "{{ item.0 }}"
+            latest_file_mtime: "{{ item.1.stat.mtime }}"
+          loop: >-
+            {{
+              hostvars
+              | dict2items
+              | map(attribute='key') | zip(
+                  hostvars
+                  | dict2items
+                  | map(attribute='value.file_stats')
+              )
+              | selectattr('1.stat.exists', 'defined')
+              | selectattr('1.stat.exists', 'equalto', true)
+              | sort(attribute='1.stat.mtime', reverse=True)
+              | list
+            }}
+          when: latest_file_host == ""  # Kun den første (dvs. nyeste)
+        
+        - name: Show which host has the latest file
+          debug:
+            msg: "Host '{{ latest_file_host }}' has the latest file modified at {{ latest_file_mtime }}"
+
+        - name: Set fact if no file was found
+          set_fact:
+            no_file_found: true
+          when: latest_file_host == ""
+
+    - name: Abort if no file was found on any server
+      fail:
+        msg: "The file '{{ file_to_sync }}' was not found on any of the target servers."
+      when: no_file_found is defined and no_file_found
+      run_once: true
+      delegate_to: localhost
+
+    - name: Fetch the latest file from the source host to control node
+      fetch:
+        src: "{{ file_to_sync }}"
+        dest: "{{ local_temp_dir_for_latest_file }}/{{ inventory_hostname }}/"
+        flat: yes
+      when: inventory_hostname == latest_file_host and latest_file_host is defined
+
+    - name: Copy the latest file to all other servers
+      copy:
+        src: "{{ local_temp_dir_for_latest_file }}/{{ file_to_sync | basename }}"
+        dest: "{{ file_to_sync }}"
+        owner: "{{ file_stats.stat.pw_name | default(omit) }}"
+        group: "{{ file_stats.stat.gr_name | default(omit) }}"
+        mode: "{{ file_stats.stat.mode | default(omit) }}"
+      when: latest_file_host is defined and inventory_hostname != latest_file_host
+
+    - name: Clean up temp directory on control node
+      file:
+        path: "{{ local_temp_dir_for_latest_file }}"
+        state: absent
+      run_once: true
+      delegate_to: localhost
+      when: latest_file_host is defined

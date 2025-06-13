@@ -1,0 +1,28 @@
+---
+- name: Configure passwordless sudo for a user
+  hosts: all
+  become: true
+
+  vars:
+    target_user: "lars"  # Replace with your actual user
+
+  tasks:
+    - name: Ensure user is present
+      ansible.builtin.user:
+        name: "{{ target_user }}"
+        state: present
+
+    - name: Add user to sudo or wheel group
+      ansible.builtin.user:
+        name: "{{ target_user }}"
+        groups: "{{ 'sudo' if ansible_os_family == 'Debian' else 'wheel' }}"
+        append: yes
+
+    - name: Configure passwordless sudo for the user
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ target_user }}"
+        content: "{{ target_user }} ALL=(ALL) NOPASSWD: ALL\n"
+        owner: root
+        group: root
+        mode: '0440'
+        validate: '/usr/sbin/visudo -cf %s'

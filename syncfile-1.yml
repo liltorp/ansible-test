@@ -1,0 +1,88 @@
+---
+- name: Synchronize latest updated file across servers
+  hosts: all # The group of your 4 servers in the inventory
+  gather_facts: yes # Gathers facts, including network information
+
+  vars:
+    file_to_sync: "/home/lars/copyfile.txt" # Define the file path once
+    local_temp_dir_for_latest_file: "/home/lars/temp" # Temporary storage on control node
+
+  tasks:
+    - name: Ensure local temporary directory exists on control node
+      ansible.builtin.file:
+        path: "{{ local_temp_dir_for_latest_file }}"
+        state: directory
+      delegate_to: localhost # Runs this task on the machine running Ansible
+      run_once: true # Only run once for the entire play
+
+    - name: Get stats of the file on each server
+      ansible.builtin.stat:
+        path: "{{ file_to_sync }}"
+      register: file_stats
+      # This task runs on each server in 'my_servers'
+      # The results (one per server) will be in 'file_stats.results' when using a loop later,
+      # or directly accessible per host via hostvars[inventory_hostname]['file_stats']
+
+    - name: Determine the host with the latest file
+      block:
+        - name: Find the most recent file and its host
+          set_fact:
+            latest_file_host: "{{ item.invocation.module_args.inventory_hostname }}"
+            latest_file_mtime: "{{ item.stat.mtime }}"
+          loop: "{{ hostvars | dict2items | map(attribute='value.file_stats') | selectattr('stat.exists', 'equalto', true) | list }}"
+          when: >
+            item.stat.exists and
+            (latest_file_mtime is not defined or item.stat.mtime > latest_file_mtime)
+          # This logic iterates through the gathered stats from all hosts.
+          # It updates 'latest_file_host' and 'latest_file_mtime' whenever a newer file is found.
+          # 'hostvars' contains facts and registered variables for all hosts.
+          # 'dict2items' converts the hostvars dictionary for easier looping.
+          # 'map(attribute='value.file_stats')' extracts the 'file_stats' result for each host.
+          # 'selectattr('stat.exists', 'equalto', true)' filters for hosts where the file actually exists.
+
+        - name: Debug Show which host has the latest file
+          ansible.builtin.debug:
+            msg: "Host '{{ latest_file_host }}' has the latest file, modified at {{ latest_file_mtime }}."
+          when: latest_file_host is defined
+
+        - name: Set fact if no file was found (edge case)
+          ansible.builtin.set_fact:
+            no_file_found: true
+          when: latest_file_host is not defined
+
+      run_once: true # This entire block should run only once on the control node logic
+      delegate_to: localhost # Perform the comparison logic on the control node
+
+    - name: Abort if no file was found on any server
+      ansible.builtin.fail:
+        msg: "The file '{{ file_to_sync }}' was not found on any of the target servers."
+      when: no_file_found is defined and no_file_found
+      run_once: true
+      delegate_to: localhost
+
+    - name: Fetch the latest file from the source host to the control node
+      ansible.builtin.fetch:
+        src: "{{ file_to_sync }}"
+        dest: "{{ local_temp_dir_for_latest_file }}/{{ inventory_hostname }}/" # Store with hostname to avoid clashes if multiple sources (though we have one)
+        flat: yes # Puts the file directly into 'dest' without the source host's path structure
+      when: inventory_hostname == latest_file_host and latest_file_host is defined
+      # This task runs on the host identified as having the latest file.
+
+    - name: Copy the latest file to all other servers
+      ansible.builtin.copy:
+        src: "{{ local_temp_dir_for_latest_file }}/{{ file_to_sync | basename }}" # Use basename to get just the filename
+        dest: "{{ file_to_sync }}"
+        owner: "{{ file_stats.stat.pw_name | default(omit) }}" # Try to preserve owner
+        group: "{{ file_stats.stat.gr_name | default(omit) }}" # Try to preserve group
+        mode: "{{ file_stats.stat.mode | default(omit) }}"   # Try to preserve mode
+      when: latest_file_host is defined and inventory_hostname != latest_file_host
+      # This task runs on all servers EXCEPT the one that had the latest file.
+      # It copies the file fetched in the previous step from the control node.
+
+    - name: Clean up local temporary directory on control node
+      ansible.builtin.file:
+        path: "{{ local_temp_dir_for_latest_file }}"
+        state: absent
+      delegate_to: localhost
+      run_once: true
+      when: latest_file_host is defined # Only cleanup if we actually did something

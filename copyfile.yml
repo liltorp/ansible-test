@@ -1,0 +1,13 @@
+---
+- name: Kopiér fil til alle servere
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Kopiér lokal fil til fjernserver
+      ansible.builtin.copy:
+        src: ./copyfile.txt        # Lokal filsti på din Ansible controller
+        dest: /home/lars/copyfile.txt    # Sti på fjernserveren
+        owner: root
+        group: root
+        mode: '0644'
